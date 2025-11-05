@@ -19,7 +19,6 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        working-directory: apps/worker
         run: npm install
 
       - name: Publish Worker
