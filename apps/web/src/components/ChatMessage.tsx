@@ -2,11 +2,15 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { format } from 'date-fns';
+import type { Pluggable } from 'unified';
 import type { ChatMessage as ChatMessageModel } from '../types';
 
 interface ChatMessageProps {
   message: ChatMessageModel;
 }
+
+const remarkPlugin = remarkGfm as unknown as Pluggable;
+const rehypePlugin = rehypeHighlight as unknown as Pluggable;
 
 export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
@@ -15,7 +19,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
       <div className={`chat-bubble ${isUser ? 'user' : 'assistant'}`}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+        <ReactMarkdown remarkPlugins={[remarkPlugin]} rehypePlugins={[rehypePlugin]}>
           {message.content}
         </ReactMarkdown>
         {message.toolResult !== undefined ? (
