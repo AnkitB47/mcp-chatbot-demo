@@ -1,0 +1,129 @@
+import { create } from 'zustand';
+import type { ChatMessage, ServerOption, ToolDefinition, TransportKind } from '../types';
+
+const DEFAULT_SERVERS: ServerOption[] = [
+  {
+    id: 'deepwiki-http',
+    label: 'DeepWiki HTTP',
+    url: 'https://mcp.deepwiki.com/mcp',
+    transport: 'http',
+    handshakeUrl: 'https://mcp.deepwiki.com/sse',
+  },
+  {
+    id: 'deepwiki-sse',
+    label: 'DeepWiki SSE',
+    url: 'https://mcp.deepwiki.com/sse',
+    transport: 'sse',
+  },
+];
+
+interface ChatState {
+  servers: ServerOption[];
+  selectedServerId: string;
+  messages: ChatMessage[];
+  toolsByServer: Record<string, ToolDefinition[]>;
+  enabledTools: Record<string, string[]>;
+  typing: boolean;
+  addMessage: (message: ChatMessage) => void;
+  clearMessages: () => void;
+  setTyping: (value: boolean) => void;
+  setToolsForServer: (serverId: string, tools: ToolDefinition[]) => void;
+  toggleTool: (serverId: string, toolName: string) => void;
+  enableAllTools: (serverId: string) => void;
+  addServer: (server: Omit<ServerOption, 'id'> & { id?: string }) => string;
+  removeServer: (serverId: string) => void;
+  setSelectedServer: (serverId: string) => void;
+}
+
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2, 11);
+}
+
+export const useChatStore = create<ChatState>((set, get) => ({
+  servers: DEFAULT_SERVERS,
+  selectedServerId: DEFAULT_SERVERS[0].id,
+  messages: [],
+  toolsByServer: {},
+  enabledTools: {},
+  typing: false,
+  addMessage: (message) =>
+    set((state) => ({
+      messages: [...state.messages, message],
+    })),
+  clearMessages: () => set({ messages: [] }),
+  setTyping: (value) => set({ typing: value }),
+  setToolsForServer: (serverId, tools) =>
+    set((state) => ({
+      toolsByServer: {
+        ...state.toolsByServer,
+        [serverId]: tools,
+      },
+      enabledTools: {
+        ...state.enabledTools,
+        [serverId]: tools.map((tool) => tool.name),
+      },
+    })),
+  toggleTool: (serverId, toolName) =>
+    set((state) => {
+      const current = new Set(state.enabledTools[serverId] ?? []);
+      if (current.has(toolName)) {
+        current.delete(toolName);
+      } else {
+        current.add(toolName);
+      }
+
+      return {
+        enabledTools: {
+          ...state.enabledTools,
+          [serverId]: Array.from(current),
+        },
+      };
+    }),
+  enableAllTools: (serverId) =>
+    set((state) => {
+      const tools = state.toolsByServer[serverId] ?? [];
+      return {
+        enabledTools: {
+          ...state.enabledTools,
+          [serverId]: tools.map((tool) => tool.name),
+        },
+      };
+    }),
+  addServer: (server) => {
+    const id = server.id ?? generateId();
+    const normalised: ServerOption = {
+      ...server,
+      id,
+      isCustom: true,
+    };
+    set((state) => ({
+      servers: [...state.servers, normalised],
+      selectedServerId: id,
+    }));
+    return id;
+  },
+  removeServer: (serverId) =>
+    set((state) => {
+      const remaining = state.servers.filter((server) => server.id !== serverId || !server.isCustom);
+      const selectedServerId =
+        state.selectedServerId === serverId ? remaining[0]?.id ?? DEFAULT_SERVERS[0].id : state.selectedServerId;
+      const { [serverId]: _removedTools, ...toolsByServer } = state.toolsByServer;
+      const { [serverId]: _removedEnabled, ...enabledTools } = state.enabledTools;
+      return {
+        servers: remaining,
+        selectedServerId,
+        toolsByServer,
+        enabledTools,
+      };
+    }),
+  setSelectedServer: (serverId) =>
+    set((state) => ({
+      selectedServerId: state.servers.some((server) => server.id === serverId) ? serverId : state.selectedServerId,
+    })),
+}));
+
+export const transports: TransportKind[] = ['http', 'sse'];
+export const defaultServers = DEFAULT_SERVERS;

@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.*
+.DS_Store
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+temp_test.py
+http.html

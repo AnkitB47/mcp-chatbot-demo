@@ -1,0 +1,21 @@
+{
+  "name": "mcp-chatbot-demo-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mcp-chatbot-demo/mcp-client": "workspace:*",
+    "@supabase/supabase-js": "^2.48.0",
+    "cookie": "^0.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.78.3"
+  }
+}

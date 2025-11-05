@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/mcp-client" },
+    { "path": "apps/worker" },
+    { "path": "apps/web" }
+  ]
+}

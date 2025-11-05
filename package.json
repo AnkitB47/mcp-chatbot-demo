@@ -1,0 +1,18 @@
+{
+  "name": "mcp-chatbot-demo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@10.9.0",
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "format": "prettier --write ."
+  },
+  "workspaces": [
+    "apps/web",
+    "apps/worker",
+    "packages/mcp-client"
+  ],
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}
