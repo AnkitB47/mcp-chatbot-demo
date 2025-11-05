@@ -87,6 +87,7 @@ create table if not exists public.profiles (
 
 - **deploy-pages.yml** (push to `main`): builds `apps/web`, injects `VITE_API_BASE`, uploads to GitHub Pages.
 - **deploy-worker.yml** (tags `v*`): installs `apps/worker`, runs `wrangler deploy` with Supabase + JWT env.
+- Secrets are stored as GitHub Actions Secrets and written to the Cloudflare Worker through `wrangler-action` secrets; no secrets ship in the client bundle.
 
 ### Worker endpoints
 

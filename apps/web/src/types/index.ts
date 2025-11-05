@@ -4,7 +4,7 @@ export type TransportKind = 'http' | 'sse';
 
 export interface ServerOption {
   id: string;
-  label: string;
+  name: string;
   url: string;
   transport: TransportKind;
   headers?: Record<string, string>;

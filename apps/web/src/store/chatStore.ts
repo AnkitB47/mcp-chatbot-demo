@@ -4,14 +4,14 @@ import type { ChatMessage, ServerOption, ToolDefinition, TransportKind } from '.
 const DEFAULT_SERVERS: ServerOption[] = [
   {
     id: 'deepwiki-http',
-    label: 'DeepWiki HTTP',
+    name: 'DeepWiki HTTP',
     url: 'https://mcp.deepwiki.com/mcp',
     transport: 'http',
     handshakeUrl: 'https://mcp.deepwiki.com/sse',
   },
   {
     id: 'deepwiki-sse',
-    label: 'DeepWiki SSE',
+    name: 'DeepWiki SSE',
     url: 'https://mcp.deepwiki.com/sse',
     transport: 'sse',
   },

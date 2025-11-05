@@ -17,8 +17,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: Install dependencies
+        working-directory: apps/worker
         run: npm install
 
       - name: Publish Worker
@@ -27,6 +29,11 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/worker
+          # IMPORTANT: this writes Worker secrets inside Cloudflare (wrangler secret put)
+          secrets: |
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            JWT_COOKIE_NAME
           command: deploy
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

@@ -1,6 +1,6 @@
 import { callTool as callMcpTool, listTools as listMcpTools, McpClientError } from '@mcp-chatbot-demo/mcp-client';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { parse as parseCookie, serialize as serializeCookie } from 'cookie';
+import { parse as parseCookie } from 'cookie';
 
 interface Env {
   SUPABASE_URL: string;
@@ -56,81 +56,76 @@ type JsonRecord = Record<string, unknown>;
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
-      return handleOptions(request, env);
+      return new Response(null, { status: 204, headers: cors(env) });
     }
 
     const url = new URL(request.url);
-    const corsHeaders = createCorsHeaders(request, env);
 
     try {
       if (request.method === 'GET' && url.pathname === '/api/health') {
-        return respondJson({ ok: true }, 200, corsHeaders);
+        return jsonResponse(env, { ok: true });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/auth/register') {
-        return await handleRegister(request, env, corsHeaders);
+        return await handleRegister(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/auth/login') {
-        return await handleLogin(request, env, corsHeaders);
+        return await handleLogin(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
-        const response = respondJson({ ok: true }, 200, corsHeaders);
-        clearSessionCookie(response, env);
-        return response;
+        return jsonResponse(env, { ok: true }, 200, {
+          'Set-Cookie': clearSessionCookie(env.JWT_COOKIE_NAME ?? 'mcp_demo_session'),
+        });
       }
 
       if (request.method === 'GET' && url.pathname === '/api/me') {
         const user = await requireUser(request, env);
         if (!user) {
-          return respondJson(errorPayload('auth_failed', 'Authentication required'), 401, corsHeaders);
+          return jsonResponse(env, errorPayload('auth_failed', 'Authentication required'), 401);
         }
-        return respondJson({ userId: user.userId, username: user.username }, 200, corsHeaders);
+        return jsonResponse(env, { userId: user.userId, username: user.username });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/mcp/list') {
         const user = await requireUser(request, env);
         if (!user) {
-          return respondJson(errorPayload('auth_failed', 'Authentication required'), 401, corsHeaders);
+          return jsonResponse(env, errorPayload('auth_failed', 'Authentication required'), 401);
         }
 
         const payload = await safeJson<ListToolsRequestBody>(request);
         if (!payload?.server) {
-          return respondJson(errorPayload('validation_failed', 'Server configuration is required'), 400, corsHeaders);
+          return jsonResponse(env, errorPayload('validation_failed', 'Server configuration is required'), 400);
         }
 
         const server = normaliseServer(payload.server);
         if (!server) {
-          return respondJson(errorPayload('validation_failed', 'Invalid server configuration'), 400, corsHeaders);
+          return jsonResponse(env, errorPayload('validation_failed', 'Invalid server configuration'), 400);
         }
 
         try {
           const tools = await listMcpTools(server);
-          return respondJson(tools, 200, corsHeaders);
+          return jsonResponse(env, tools);
         } catch (error) {
-          return respondJson(
-            errorPayload('mcp_unreachable', asErrorMessage(error, 'Failed to list tools')),
-            502,
-            corsHeaders,
-          );
+          return jsonResponse(env, errorPayload('mcp_unreachable', asErrorMessage(error, 'Failed to list tools')), 502);
         }
       }
 
       if (request.method === 'POST' && url.pathname === '/api/mcp/call') {
         const user = await requireUser(request, env);
         if (!user) {
-          return respondJson(errorPayload('auth_failed', 'Authentication required'), 401, corsHeaders);
+          return jsonResponse(env, errorPayload('auth_failed', 'Authentication required'), 401);
         }
 
         const payload = await safeJson<CallToolRequestBody>(request);
         if (!payload?.server || !payload.name) {
-          return respondJson(errorPayload('validation_failed', 'Tool name and server are required'), 400, corsHeaders);
+          return jsonResponse(env, errorPayload('validation_failed', 'Tool name and server are required'), 400);
         }
 
         const server = normaliseServer(payload.server);
         if (!server) {
-          return respondJson(errorPayload('validation_failed', 'Invalid server configuration'), 400, corsHeaders);
+          return jsonResponse(env, errorPayload('validation_failed', 'Invalid server configuration'), 400);
         }
 
         try {
@@ -139,36 +134,32 @@ export default {
             name: payload.name,
             args: payload.args ?? {},
           });
-          return respondJson({ result }, 200, corsHeaders);
+          return jsonResponse(env, { result });
         } catch (error) {
-          return respondJson(
-            errorPayload('mcp_unreachable', asErrorMessage(error, 'Failed to call MCP tool')),
-            502,
-            corsHeaders,
-          );
+          return jsonResponse(env, errorPayload('mcp_unreachable', asErrorMessage(error, 'Failed to call MCP tool')), 502);
         }
       }
 
       if (request.method === 'POST' && url.pathname === '/api/chat') {
         const user = await requireUser(request, env);
         if (!user) {
-          return respondJson(errorPayload('auth_failed', 'Authentication required'), 401, corsHeaders);
+          return jsonResponse(env, errorPayload('auth_failed', 'Authentication required'), 401);
         }
 
         const payload = await safeJson<ChatRequestBody>(request);
         if (!payload?.message || !payload.server) {
-          return respondJson(errorPayload('validation_failed', 'Message and server are required'), 400, corsHeaders);
+          return jsonResponse(env, errorPayload('validation_failed', 'Message and server are required'), 400);
         }
 
         const server = normaliseServer(payload.server);
         if (!server) {
-          return respondJson(errorPayload('validation_failed', 'Invalid server configuration'), 400, corsHeaders);
+          return jsonResponse(env, errorPayload('validation_failed', 'Invalid server configuration'), 400);
         }
 
         if (payload.maybeTool) {
           const parsed = parseToolCommand(payload.maybeTool);
           if (!parsed) {
-            return respondJson(errorPayload('validation_failed', 'Unable to parse tool command.'), 400, corsHeaders);
+            return jsonResponse(env, errorPayload('validation_failed', 'Unable to parse tool command.'), 400);
           }
 
           try {
@@ -178,7 +169,8 @@ export default {
               args: parsed.args,
             });
 
-            return respondJson(
+            return jsonResponse(
+              env,
               {
                 reply: {
                   role: 'assistant',
@@ -186,42 +178,36 @@ export default {
                 },
                 toolResult,
               },
-              200,
-              corsHeaders,
             );
           } catch (error) {
             const code = error instanceof McpClientError ? 'mcp_error' : 'mcp_unreachable';
             const status = code === 'mcp_error' ? 400 : 502;
-            return respondJson(errorPayload(code, asErrorMessage(error, 'Tool execution failed')), status, corsHeaders);
+            return jsonResponse(env, errorPayload(code, asErrorMessage(error, 'Tool execution failed')), status);
           }
         }
 
         const trimmed = payload.message.trim();
         const responseText = buildTemplateReply(user.username, trimmed);
 
-        return respondJson(
-          {
-            reply: {
-              role: 'assistant',
-              content: responseText,
-            },
+        return jsonResponse(env, {
+          reply: {
+            role: 'assistant',
+            content: responseText,
           },
-          200,
-          corsHeaders,
-        );
+        });
       }
 
-      return respondJson(errorPayload('not_found', 'Route not found'), 404, corsHeaders);
+      return jsonResponse(env, errorPayload('not_found', 'Route not found'), 404);
     } catch (error) {
       if (error instanceof HttpError) {
-        return respondJson(error.payload, error.status, corsHeaders);
+        return jsonResponse(env, error.payload, error.status);
       }
-      return respondJson(errorPayload('internal_error', asErrorMessage(error, 'Internal server error')), 500, corsHeaders);
+      return jsonResponse(env, errorPayload('internal_error', asErrorMessage(error, 'Internal server error')), 500);
     }
   },
 };
 
-async function handleRegister(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+async function handleRegister(request: Request, env: Env): Promise<Response> {
   const payload = await safeJson<RegisterRequestBody>(request);
   if (!payload?.username || !payload.email || !payload.password) {
     throw new HttpError(400, errorPayload('validation_failed', 'Username, email, and password are required.'));
@@ -275,19 +261,18 @@ async function handleRegister(request: Request, env: Env, corsHeaders: Record<st
     throw new HttpError(502, errorPayload('auth_failed', 'Registered but automatic login failed, please login manually.'));
   }
 
-  const response = respondJson(
-    {
-      userId: createdUser.user.id,
-      username,
-    },
+  const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
+  return jsonResponse(
+    env,
+    { ok: true },
     201,
-    corsHeaders,
+    {
+      'Set-Cookie': attachSessionCookie(cookieName, loginResult.data.session.access_token),
+    },
   );
-  attachSessionCookie(response, env, loginResult.data.session.access_token);
-  return response;
 }
 
-async function handleLogin(request: Request, env: Env, corsHeaders: Record<string, string>): Promise<Response> {
+async function handleLogin(request: Request, env: Env): Promise<Response> {
   const payload = await safeJson<LoginRequestBody>(request);
   if (!payload?.usernameOrEmail || !payload.password) {
     throw new HttpError(400, errorPayload('validation_failed', 'Username/email and password are required.'));
@@ -350,17 +335,15 @@ async function handleLogin(request: Request, env: Env, corsHeaders: Record<strin
     }
   }
 
-  const response = respondJson(
-    {
-      userId: signInData.user.id,
-      username,
-    },
+  const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
+  return jsonResponse(
+    env,
+    { ok: true },
     200,
-    corsHeaders,
+    {
+      'Set-Cookie': attachSessionCookie(cookieName, signInData.session.access_token),
+    },
   );
-
-  attachSessionCookie(response, env, signInData.session.access_token);
-  return response;
 }
 
 function createSupabase(env: Env): SupabaseClient {
@@ -370,30 +353,6 @@ function createSupabase(env: Env): SupabaseClient {
       autoRefreshToken: false,
     },
   });
-}
-
-function attachSessionCookie(response: Response, env: Env, token: string) {
-  const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
-  const cookie = serializeCookie(cookieName, token, {
-    path: '/',
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-  });
-  response.headers.append('Set-Cookie', cookie);
-}
-
-function clearSessionCookie(response: Response, env: Env) {
-  const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
-  const cookie = serializeCookie(cookieName, '', {
-    path: '/',
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 0,
-  });
-  response.headers.append('Set-Cookie', cookie);
 }
 
 async function requireUser(request: Request, env: Env): Promise<AuthenticatedUser | null> {
@@ -423,16 +382,6 @@ async function requireUser(request: Request, env: Env): Promise<AuthenticatedUse
 
   return { userId: data.user.id, username: profile?.username ?? null };
 }
-
-    userId: createdUser.user.id,
-    username,
-  };
-
-  const response = respondJson(responsePayload);
-  attachSessionCookie(response, env, loginResult.data.session.access_token);
-  return responsePayload;
-}
-
 
 function parseToolCommand(raw: string): { name: string; args: Record<string, unknown> } | null {
   const text = raw.trim();
@@ -509,33 +458,37 @@ function normaliseServer(payload: ServerPayload): {
   };
 }
 
-function handleOptions(request: Request, env: Env): Response {
-  const headers = createCorsHeaders(request, env);
-  headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS';
-  headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
-  return new Response(null, { status: 204, headers });
+function attachSessionCookie(name: string, token: string, maxAgeSec = 60 * 60 * 24 * 7): string {
+  return `${name}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; Secure; SameSite=None`;
 }
 
-function createCorsHeaders(request: Request, env: Env): Record<string, string> {
-  const origin = request.headers.get('Origin');
-  const headers: Record<string, string> = {
+function clearSessionCookie(name: string): string {
+  return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None`;
+}
+
+function cors(env: Env): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN,
     'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Headers': 'content-type, authorization',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
     Vary: 'Origin',
   };
-
-  if (origin && origin === env.ALLOWED_ORIGIN) {
-    headers['Access-Control-Allow-Origin'] = origin;
-  }
-
-  return headers;
 }
 
-function respondJson(body: JsonRecord, status = 200, headers?: Record<string, string>): Response {
-  const responseHeaders = new Headers(headers ?? {});
-  responseHeaders.set('Content-Type', 'application/json');
+function jsonResponse(
+  env: Env,
+  body: JsonRecord,
+  status = 200,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: responseHeaders,
+    headers: {
+      'content-type': 'application/json',
+      ...cors(env),
+      ...(extraHeaders ?? {}),
+    },
   });
 }
 

@@ -16,14 +16,14 @@ export default function ServerSidebar({ children }: ServerSidebarProps) {
   }));
 
   const [isAdding, setIsAdding] = useState(false);
-  const [label, setLabel] = useState('');
+  const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [transport, setTransport] = useState<'http' | 'sse'>('http');
   const [handshakeUrl, setHandshakeUrl] = useState('');
 
   const handleSubmit = () => {
-    if (!label.trim() || !url.trim()) {
-      toast.error('Label and URL are required.');
+    if (!name.trim() || !url.trim()) {
+      toast.error('Name and URL are required.');
       return;
     }
 
@@ -38,7 +38,7 @@ export default function ServerSidebar({ children }: ServerSidebarProps) {
     }
 
     const id = addServer({
-      label: label.trim(),
+      name: name.trim(),
       url: url.trim(),
       transport,
       handshakeUrl: handshakeUrl.trim() || undefined,
@@ -46,8 +46,8 @@ export default function ServerSidebar({ children }: ServerSidebarProps) {
       timeoutMs: undefined,
     });
 
-    toast.success(`Server "${label.trim()}" added.`);
-    setLabel('');
+    toast.success(`Server "${name.trim()}" added.`);
+    setName('');
     setUrl('');
     setHandshakeUrl('');
     setTransport('http');
@@ -89,7 +89,7 @@ export default function ServerSidebar({ children }: ServerSidebarProps) {
               />
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong>{server.label}</strong>
+                  <strong>{server.name}</strong>
                   <span
                     style={{
                       fontSize: '0.7rem',
@@ -138,11 +138,11 @@ export default function ServerSidebar({ children }: ServerSidebarProps) {
             }}
           >
             <div className="form-field" style={{ marginBottom: 0 }}>
-              <label htmlFor="server-label">Label</label>
+              <label htmlFor="server-label">Name</label>
               <input
                 id="server-label"
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
                 placeholder="My MCP Server"
               />
             </div>

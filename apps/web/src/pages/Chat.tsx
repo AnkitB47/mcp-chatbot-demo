@@ -144,7 +144,7 @@ export default function ChatPage() {
         <div className="chat-scroll scroll-y">
           {selectedServer ? (
             <div style={{ opacity: 0.65, fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-              Connected to <strong>{selectedServer.label}</strong>
+              Connected to <strong>{selectedServer.name}</strong>
             </div>
           ) : null}
           {messages.map((message) => (

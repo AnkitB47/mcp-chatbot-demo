@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 
 export class ApiError extends Error {
@@ -8,29 +7,37 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      'content-type': 'application/json',
       ...(init.headers ?? {}),
     },
     ...init,
   });
 
-  const text = await response.text();
-  const data = text ? safeParseJson(text) : null;
-
   if (!response.ok) {
-    const message =
-      typeof data?.error?.message === 'string'
-        ? data.error.message
-        : `Request failed with status ${response.status}`;
-    const code = typeof data?.error?.code === 'string' ? data.error.code : undefined;
+    const text = await response.text();
+    let message = text || `Request failed with status ${response.status}`;
+    let code: string | undefined;
+
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.error?.message) {
+        message = parsed.error.message;
+      }
+      if (parsed?.error?.code) {
+        code = parsed.error.code;
+      }
+    } catch {
+      // Ignore JSON parse issues for error bodies.
+    }
+
     throw new ApiError(response.status, message, code);
   }
 
-  return data as T;
+  return response;
 }
 
 export interface SessionResponse {
@@ -62,42 +69,47 @@ export interface ChatResponse {
 }
 
 export const api = {
-  getSession: () => apiFetch<SessionResponse>('/api/me'),
+  getSession: async () => {
+    const res = await apiFetch('/api/me');
+    return (await res.json()) as SessionResponse;
+  },
 
-  register: (body: { username: string; email: string; password: string }) =>
-    apiFetch<SessionResponse>('/api/auth/register', {
+  register: async (body: { username: string; email: string; password: string }) => {
+    const res = await apiFetch('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify(body),
-    }),
+    });
+    return (await res.json()) as { ok: boolean };
+  },
 
-  login: (body: { usernameOrEmail: string; password: string }) =>
-    apiFetch<SessionResponse>('/api/auth/login', {
+  login: async (body: { usernameOrEmail: string; password: string }) => {
+    const res = await apiFetch('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(body),
-    }),
+    });
+    return (await res.json()) as { ok: boolean };
+  },
 
-  logout: () =>
-    apiFetch<{ ok: boolean }>('/api/auth/logout', {
+  logout: async () => {
+    const res = await apiFetch('/api/auth/logout', {
       method: 'POST',
-    }),
+    });
+    return (await res.json()) as { ok: boolean };
+  },
 
-  listTools: (server: ServerConfigPayload) =>
-    apiFetch<{ tools: ToolDefinition[] }>('/api/mcp/list', {
+  listTools: async (server: ServerConfigPayload) => {
+    const res = await apiFetch('/api/mcp/list', {
       method: 'POST',
       body: JSON.stringify({ server }),
-    }),
+    });
+    return (await res.json()) as { tools: ToolDefinition[] };
+  },
 
-  sendChat: (payload: { message: string; maybeTool?: string | null; server: ServerConfigPayload }) =>
-    apiFetch<ChatResponse>('/api/chat', {
+  sendChat: async (payload: { message: string; maybeTool?: string | null; server: ServerConfigPayload }) => {
+    const res = await apiFetch('/api/chat', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
+    });
+    return (await res.json()) as ChatResponse;
+  },
 };
-
-function safeParseJson(value: string): any {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}

@@ -26,8 +26,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: Install dependencies
+        working-directory: apps/web
         run: npm install
 
       - name: Inject Vite environment
@@ -35,7 +37,8 @@ jobs:
         run: echo "VITE_API_BASE=${{ vars.VITE_API_BASE }}" > .env
 
       - name: Build
-        run: npm run build --workspace apps/web
+        working-directory: apps/web
+        run: npm run build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
