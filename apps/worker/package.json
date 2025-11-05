@@ -9,7 +9,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@mcp-chatbot-demo/mcp-client": "workspace:*",
+    "@mcp-chatbot-demo/mcp-client": "file:../../packages/mcp-client",
     "@supabase/supabase-js": "^2.48.0",
     "cookie": "^0.6.0"
   },
