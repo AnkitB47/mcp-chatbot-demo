@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2024-09-10"
 
 [vars]
-ALLOWED_ORIGIN = "https://ankitb47.github.io/mcp-chatbot-demo/"
+ALLOWED_ORIGIN = "https://ankitb47.github.io"
 
 [observability]
 enabled = true
