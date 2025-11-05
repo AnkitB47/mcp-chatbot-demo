@@ -19,6 +19,7 @@ export interface McpServerConfig {
 
 export interface ListToolsResponse {
   tools: Array<{ name: string; description?: string }>;
+  warnings?: string[];
 }
 
 export interface CallToolArgs {
@@ -42,11 +43,19 @@ class McpClientError extends Error {
   }
 }
 
+class HttpStatusError extends Error {
+  constructor(message: string, public readonly status: number, public readonly body: string) {
+    super(message);
+    this.name = 'HttpStatusError';
+  }
+}
+
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 export async function listTools(config: McpServerConfig): Promise<ListToolsResponse> {
   const payload = createRpcPayload('tools/list', {});
-  const response = await sendRpc(config, payload);
+  const warnings: string[] = [];
+  const response = await sendRpc(config, payload, { warnings });
   const tools = Array.isArray(response.result?.tools) ? response.result.tools : [];
 
   return {
@@ -54,6 +63,7 @@ export async function listTools(config: McpServerConfig): Promise<ListToolsRespo
       name: typeof tool?.name === 'string' ? tool.name : 'unknown',
       description: typeof tool?.description === 'string' ? tool.description : undefined,
     })),
+    warnings: warnings.length ? warnings : undefined,
   };
 }
 
@@ -75,22 +85,29 @@ interface RpcResponse {
   error?: { code: number; message: string; data?: any };
 }
 
-async function sendRpc(config: McpServerConfig, payload: RpcPayload): Promise<RpcResponse>;
-async function sendRpc(config: CallToolArgs, payload: RpcPayload): Promise<RpcResponse>;
-async function sendRpc(config: McpServerConfig | CallToolArgs, payload: RpcPayload): Promise<RpcResponse> {
+interface RpcRequestOptions {
+  warnings?: string[];
+}
+
+async function sendRpc(config: McpServerConfig, payload: RpcPayload, options?: RpcRequestOptions): Promise<RpcResponse>;
+async function sendRpc(config: CallToolArgs, payload: RpcPayload, options?: RpcRequestOptions): Promise<RpcResponse>;
+async function sendRpc(
+  config: McpServerConfig | CallToolArgs,
+  payload: RpcPayload,
+  options?: RpcRequestOptions,
+): Promise<RpcResponse> {
   const transport = config.transport;
 
   if (transport === 'http') {
-    // Many public MCP servers rely on SSE-backed sessions even when using HTTP JSON-RPC.
-    // We fall back to the SSE transport flow to maximise compatibility.
-    return sendViaSse(
+    return sendViaHttp(
       {
-        url: deriveSseUrl(config),
+        url: config.url,
         headers: config.headers ?? {},
         timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       },
       payload,
       config.handshakeUrl,
+      options?.warnings,
     );
   }
 
@@ -105,10 +122,145 @@ async function sendRpc(config: McpServerConfig | CallToolArgs, payload: RpcPaylo
   );
 }
 
+interface HttpRequestConfig {
+  url: string;
+  headers: Record<string, string>;
+  timeoutMs: number;
+}
+
 interface SseRequestConfig {
   url: string;
   headers: Record<string, string>;
   timeoutMs: number;
+}
+
+async function sendViaHttp(
+  config: HttpRequestConfig,
+  payload: RpcPayload,
+  handshakeUrl?: string,
+  warnings?: string[],
+): Promise<RpcResponse> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    ...config.headers,
+  };
+
+  const ignoredStatuses = new Set([404, 405, 501]);
+
+  const pushWarning = (message: string) => {
+    if (warnings && !warnings.includes(message)) {
+      warnings.push(message);
+    }
+    // eslint-disable-next-line no-console
+    console.warn(`[mcp-client] ${message}`);
+  };
+
+  const attemptInitialize = async (targetUrl: string, label: string): Promise<boolean> => {
+    if (!targetUrl) {
+      return false;
+    }
+
+    const initPayload = createRpcPayload('initialize', {});
+
+    try {
+      await postJsonRpc(targetUrl, initPayload, headers, config.timeoutMs);
+      return true;
+    } catch (error) {
+      if (error instanceof HttpStatusError) {
+        if (ignoredStatuses.has(error.status)) {
+          pushWarning(`${label} endpoint ${targetUrl} responded with status ${error.status}; continuing without handshake.`);
+          return false;
+        }
+
+        pushWarning(`${label} endpoint ${targetUrl} returned status ${error.status}; continuing without handshake.`);
+        return false;
+      }
+
+      if (error instanceof McpClientError) {
+        pushWarning(`${label} endpoint ${targetUrl} failed: ${error.message}; continuing without handshake.`);
+        return false;
+      }
+
+      pushWarning(`${label} endpoint ${targetUrl} failed; continuing without handshake.`);
+      return false;
+    }
+  };
+
+  if (handshakeUrl) {
+    const handshakeSucceeded = await attemptInitialize(handshakeUrl, 'Handshake');
+    if (!handshakeSucceeded) {
+      await attemptInitialize(config.url, 'Initialize');
+    }
+  } else {
+    await attemptInitialize(config.url, 'Initialize');
+  }
+
+  try {
+    return await postJsonRpc(config.url, payload, headers, config.timeoutMs);
+  } catch (error) {
+    if (error instanceof HttpStatusError && payload.method === 'tools/list') {
+      throw new McpClientError(
+        `Couldn't list tools at ${config.url} (status ${error.status}). This server may not implement JSON-RPC at this path.`,
+        'http_error',
+      );
+    }
+
+    if (error instanceof HttpStatusError) {
+      throw new McpClientError(`Request failed at ${config.url} (status ${error.status}).`, 'http_error');
+    }
+
+    if (error instanceof McpClientError) {
+      throw error;
+    }
+
+    throw new McpClientError('HTTP transport failed', 'http_error');
+  }
+}
+
+async function postJsonRpc(
+  url: string,
+  payload: RpcPayload,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<RpcResponse> {
+  const response = await withTimeout(
+    fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    }),
+    timeoutMs,
+    'http_timeout',
+  );
+
+  if (!response.ok) {
+    let body = '';
+    try {
+      body = await response.text();
+    } catch {
+      body = '';
+    }
+    throw new HttpStatusError(`HTTP error ${response.status} at ${url}`, response.status, body);
+  }
+
+  let raw = '';
+  try {
+    raw = await response.text();
+  } catch {
+    throw new McpClientError('Failed to read response body', 'invalid_response');
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { jsonrpc: '2.0', id: payload.id ?? null, result: undefined };
+  }
+
+  try {
+    return JSON.parse(trimmed) as RpcResponse;
+  } catch {
+    throw new McpClientError('Failed to parse JSON-RPC response', 'invalid_json');
+  }
 }
 
 async function sendViaSse(config: SseRequestConfig, payload: RpcPayload, explicitHandshakeUrl?: string): Promise<RpcResponse> {
@@ -186,26 +338,6 @@ async function sendViaSse(config: SseRequestConfig, payload: RpcPayload, explici
   } finally {
     await stream.close().catch(() => undefined);
     controller.abort();
-  }
-}
-
-function deriveSseUrl(config: McpServerConfig | CallToolArgs): string {
-  if ('handshakeUrl' in config && config.handshakeUrl) {
-    return config.handshakeUrl;
-  }
-
-  try {
-    const parsed = new URL(config.url);
-    if (parsed.pathname.endsWith('/mcp')) {
-      parsed.pathname = parsed.pathname.replace(/\/mcp$/, '/sse');
-    } else if (!parsed.pathname.endsWith('/sse')) {
-      parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/sse`;
-    }
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString();
-  } catch (error) {
-    throw new McpClientError('Invalid MCP server URL', 'invalid_url');
   }
 }
 

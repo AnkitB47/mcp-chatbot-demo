@@ -65,6 +65,11 @@ export interface ToolDefinition {
   description?: string;
 }
 
+export interface ListToolsApiResponse {
+  tools: ToolDefinition[];
+  warnings?: string[];
+}
+
 export interface ChatResponse {
   reply: {
     role: string;
@@ -109,7 +114,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ server }),
     });
-    return (await res.json()) as { tools: ToolDefinition[] };
+    return (await res.json()) as ListToolsApiResponse;
   },
 
   sendChat: async (payload: { message: string; maybeTool?: string | null; server: ServerConfigPayload }) => {
