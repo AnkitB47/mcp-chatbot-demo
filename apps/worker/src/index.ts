@@ -80,6 +80,10 @@ export default {
         });
       }
 
+      if (request.method === 'POST' && url.pathname === '/api/mock-mcp') {
+        return handleMockMcp(request, env);
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/me') {
         const supabase = createSupabase(env);
         const { token, user } = await getUserFromCookie(request, env, supabase);
@@ -384,6 +388,150 @@ async function requireUser(request: Request, env: Env): Promise<AuthenticatedUse
   }
 
   return { userId: user.id, username: profile?.username ?? null };
+}
+
+async function handleMockMcp(request: Request, env: Env): Promise<Response> {
+  let payload: any;
+  try {
+    payload = await request.json();
+  } catch {
+    return rpcErrorResponse(env, null, -32700, 'Parse error');
+  }
+
+  const rpcId = extractRpcId(payload);
+
+  if (!payload || payload.jsonrpc !== '2.0' || typeof payload.method !== 'string') {
+    return rpcErrorResponse(env, rpcId, -32600, 'Invalid Request');
+  }
+
+  try {
+    if (payload.method === 'tools/list') {
+      return rpcSuccess(env, rpcId, {
+        tools: [
+          { name: 'echo', description: 'Echo back provided JSON' },
+          { name: 'time_now', description: 'Current server time in ISO' },
+          {
+            name: 'http_title',
+            description: 'Return the <title> of a web page',
+            schema: {
+              type: 'object',
+              properties: {
+                url: { type: 'string' },
+              },
+              required: ['url'],
+            },
+          },
+        ],
+      });
+    }
+
+    if (payload.method === 'tools/call') {
+      const params = payload.params ?? {};
+      const name = typeof params?.name === 'string' ? params.name : null;
+      const args =
+        params?.arguments && typeof params.arguments === 'object' && params.arguments !== null
+          ? (params.arguments as Record<string, unknown>)
+          : {};
+
+      if (!name) {
+        return rpcErrorResponse(env, rpcId, -32602, 'Invalid params');
+      }
+
+      switch (name) {
+        case 'echo':
+          return rpcSuccess(env, rpcId, { echoed: args });
+        case 'time_now': {
+          const now = new Date();
+          const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+          return rpcSuccess(env, rpcId, {
+            iso: now.toISOString(),
+            epochMs: now.getTime(),
+            timeZone,
+          });
+        }
+        case 'http_title': {
+          const urlValue = (args as Record<string, unknown>).url;
+          if (typeof urlValue !== 'string') {
+            return rpcErrorResponse(env, rpcId, -32602, 'Invalid params');
+          }
+
+          let target: URL;
+          try {
+            target = new URL(urlValue);
+          } catch {
+            return rpcErrorResponse(env, rpcId, -32602, 'Invalid URL');
+          }
+
+          if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+            return rpcErrorResponse(env, rpcId, -32602, 'URL must use http or https');
+          }
+
+          try {
+            const response = await fetch(target.toString(), {
+              method: 'GET',
+              headers: { Accept: 'text/html,application/xhtml+xml' },
+            });
+
+            if (!response.ok) {
+              return rpcErrorResponse(
+                env,
+                rpcId,
+                -32000,
+                `Failed to fetch URL (status ${response.status})`,
+              );
+            }
+
+            const body = await response.text();
+            const match = /<title[^>]*>([^<]*)<\/title>/i.exec(body);
+            if (!match) {
+              return rpcErrorResponse(env, rpcId, -32001, 'Page does not contain a <title> element');
+            }
+
+            return rpcSuccess(env, rpcId, {
+              url: target.toString(),
+              title: match[1].trim(),
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unable to fetch URL';
+            return rpcErrorResponse(env, rpcId, -32000, message);
+          }
+        }
+        default:
+          return rpcErrorResponse(env, rpcId, -32601, 'Method not found');
+      }
+    }
+
+    return rpcErrorResponse(env, rpcId, -32601, 'Method not found');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Internal error';
+    return rpcErrorResponse(env, rpcId, -32603, message);
+  }
+}
+
+function rpcSuccess(env: Env, id: string | number | null, result: unknown): Response {
+  return jsonResponse(env, {
+    jsonrpc: '2.0',
+    id,
+    result,
+  });
+}
+
+function rpcErrorResponse(env: Env, id: string | number | null, code: number, message: string): Response {
+  return jsonResponse(env, {
+    jsonrpc: '2.0',
+    id,
+    error: {
+      code,
+      message,
+    },
+  });
+}
+
+function extractRpcId(payload: any): string | number | null {
+  if (typeof payload?.id === 'string' || typeof payload?.id === 'number') {
+    return payload.id;
+  }
+  return null;
 }
 
 function parseToolCommand(raw: string): { name: string; args: Record<string, unknown> } | null {

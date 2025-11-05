@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, type ListToolsApiResponse } from '../lib/api';
 import { useChatStore } from '../store/chatStore';
 import { parseToolCommand, serverToPayload } from '../lib/tools';
 import ServerSidebar from '../components/ServerSidebar';
@@ -10,6 +10,12 @@ import ChatMessage from '../components/ChatMessage';
 import MessageComposer from '../components/MessageComposer';
 import TypingIndicator from '../components/TypingIndicator';
 import type { ServerOption } from '../types';
+
+interface LoadToolsParams {
+  server: ServerOption;
+  effectiveServer: ServerOption;
+  usedFallback: boolean;
+}
 
 function generateId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -50,15 +56,70 @@ export default function ChatPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typing]);
 
-  const loadToolsMutation = useMutation({
-    mutationFn: (server: ServerOption) => api.listTools(serverToPayload(server)),
-    onSuccess: (data, server) => {
-      setToolsForServer(server.id, data.tools);
-      toast.success(`Loaded ${data.tools.length} tool${data.tools.length === 1 ? '' : 's'}.`);
+  const deriveHttpFallback = (url: string): string | null => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith('/sse')) {
+        parsed.pathname = parsed.pathname.replace(/\/sse$/, '/mcp');
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed.toString();
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const buildEffectiveServer = (server: ServerOption): { effectiveServer: ServerOption; usedFallback: boolean } => {
+    if (server.transport !== 'sse') {
+      return { effectiveServer: server, usedFallback: false };
+    }
+
+    const fallbackUrl = deriveHttpFallback(server.url);
+    if (fallbackUrl) {
+      toast('SSE endpoints are experimental; trying HTTP fallback.', { icon: 'ℹ️', duration: 4000 });
+      return {
+        effectiveServer: {
+          ...server,
+          url: fallbackUrl,
+          transport: 'http',
+          handshakeUrl: undefined,
+        },
+        usedFallback: true,
+      };
+    }
+
+    toast('SSE support is experimental. Consider using the HTTP endpoint for best results.', { icon: 'ℹ️', duration: 4000 });
+    return { effectiveServer: server, usedFallback: false };
+  };
+  const loadToolsMutation = useMutation<ListToolsApiResponse, unknown, LoadToolsParams>({
+    mutationFn: async (params) => api.listTools(serverToPayload(params.effectiveServer)),
+    onSuccess: (response, params) => {
+      if (!params) {
+        return;
+      }
+
+      const { server, usedFallback } = params;
+      setToolsForServer(server.id, response.tools);
+      toast.success(`Loaded ${response.tools.length} tool${response.tools.length === 1 ? '' : 's'}.`);
+      response.warnings?.forEach((warning) => toast(warning, { icon: 'ℹ️', duration: 4000 }));
+      if (usedFallback) {
+        toast('SSE endpoint responded via HTTP fallback.', { icon: 'ℹ️', duration: 4000 });
+      }
     },
-    onError: (error: unknown) => {
-      const message =
-        error instanceof ApiError || error instanceof Error ? error.message : 'Unable to load tools.';
+    onError: (error: unknown, params) => {
+      const targetServer = params?.server;
+      if (error instanceof ApiError && targetServer) {
+        if (error.status === 404 || error.status === 405) {
+          toast.error(
+            `Couldn't list tools at ${targetServer.url} (status ${error.status}). This server may not support JSON-RPC POST; try another.`,
+          );
+          return;
+        }
+      }
+
+      const message = error instanceof ApiError || error instanceof Error ? error.message : 'Unable to load tools.';
       toast.error(message);
     },
   });
@@ -131,7 +192,9 @@ export default function ChatPage() {
       toast.error('Select a server first.');
       return;
     }
-    loadToolsMutation.mutate(selectedServer);
+
+    const { effectiveServer, usedFallback } = buildEffectiveServer(selectedServer);
+    loadToolsMutation.mutate({ server: selectedServer, effectiveServer, usedFallback });
   };
 
   return (

@@ -1,19 +1,28 @@
 import { create } from 'zustand';
 import type { ChatMessage, ServerOption, ToolDefinition, TransportKind } from '../types';
 
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
+const NORMALIZED_API_BASE = RAW_API_BASE.trim().length > 0 ? RAW_API_BASE.replace(/\/$/, '') : 'http://localhost:8787';
+const MOCK_MCP_URL = `${NORMALIZED_API_BASE}/api/mock-mcp`;
+
 const DEFAULT_SERVERS: ServerOption[] = [
+  {
+    id: 'mock-demo-http',
+    name: 'Demo Mock MCP',
+    url: MOCK_MCP_URL,
+    transport: 'http',
+  },
   {
     id: 'deepwiki-http',
     name: 'DeepWiki HTTP',
     url: 'https://mcp.deepwiki.com/mcp',
     transport: 'http',
-    handshakeUrl: 'https://mcp.deepwiki.com/sse',
   },
   {
-    id: 'deepwiki-sse',
-    name: 'DeepWiki SSE',
-    url: 'https://mcp.deepwiki.com/sse',
-    transport: 'sse',
+    id: 'llama-http',
+    name: 'Llama HTTP',
+    url: 'https://mcp.llamaindex.ai/mcp',
+    transport: 'http',
   },
 ];
 
@@ -127,3 +136,4 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
 export const transports: TransportKind[] = ['http', 'sse'];
 export const defaultServers = DEFAULT_SERVERS;
+

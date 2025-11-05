@@ -196,43 +196,82 @@ async function sendViaHttp(
     await attemptInitialize(config.url, 'Initialize');
   }
 
-  try {
-    return await postJsonRpc(config.url, payload, headers, config.timeoutMs);
-  } catch (error) {
-    if (error instanceof HttpStatusError && payload.method === 'tools/list') {
-      throw new McpClientError(
-        `Couldn't list tools at ${config.url} (status ${error.status}). This server may not implement JSON-RPC at this path.`,
-        'http_error',
-      );
-    }
+  const executePost = () => postJsonRpc(config.url, payload, headers, config.timeoutMs);
+  const executeGetFallback = async () => {
+    pushWarning(`POST ${config.url} was rejected; retrying with GET jsonrpc query parameter.`);
+    return getJsonRpc(config.url, payload, headers, config.timeoutMs);
+  };
 
-    if (error instanceof HttpStatusError) {
-      throw new McpClientError(`Request failed at ${config.url} (status ${error.status}).`, 'http_error');
-    }
+  let attempt = 0;
+  const maxAttempts = 2;
 
-    if (error instanceof McpClientError) {
-      throw error;
-    }
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      return await executePost();
+    } catch (error) {
+      if (error instanceof HttpStatusError && (error.status === 405 || error.status === 403)) {
+        try {
+          return await executeGetFallback();
+        } catch (getError) {
+          error = getError;
+        }
+      } else if (error instanceof HttpStatusError && error.status === 404) {
+        pushWarning(`POST ${config.url} returned 404; continuing without handshake.`);
+        try {
+          return await executeGetFallback();
+        } catch (getError) {
+          error = getError;
+        }
+      }
 
-    throw new McpClientError('HTTP transport failed', 'http_error');
+      if (error instanceof HttpStatusError && payload.method === 'tools/list') {
+        throw new McpClientError(
+          `Couldn't list tools at ${config.url} (status ${error.status}). This server may not implement JSON-RPC at this path.`,
+          'http_error',
+        );
+      }
+
+      if (error instanceof HttpStatusError) {
+        throw new McpClientError(`Request failed at ${config.url} (status ${error.status}).`, 'http_error');
+      }
+
+      if (error instanceof McpClientError) {
+        if (attempt + 1 < maxAttempts && isRetryableError(error)) {
+          attempt += 1;
+          continue;
+        }
+        throw error;
+      }
+
+      throw new McpClientError('HTTP transport failed', 'http_error');
+    }
   }
 }
-
 async function postJsonRpc(
   url: string,
   payload: RpcPayload,
   headers: Record<string, string>,
   timeoutMs: number,
 ): Promise<RpcResponse> {
-  const response = await withTimeout(
-    fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    }),
-    timeoutMs,
-    'http_timeout',
-  );
+  let response: Response;
+  try {
+    response = await withTimeout(
+      fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      }),
+      timeoutMs,
+      'http_timeout',
+    );
+  } catch (error) {
+    if (error instanceof McpClientError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : 'Network request failed';
+    throw new McpClientError(message, 'network_error');
+  }
 
   if (!response.ok) {
     let body = '';
@@ -263,62 +302,99 @@ async function postJsonRpc(
   }
 }
 
-async function sendViaSse(config: SseRequestConfig, payload: RpcPayload, explicitHandshakeUrl?: string): Promise<RpcResponse> {
-  const handshakeUrl = explicitHandshakeUrl ?? config.url;
-  const controller = new AbortController();
+async function getJsonRpc(
+  url: string,
+  payload: RpcPayload,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<RpcResponse> {
+  const target = new URL(url);
+  target.searchParams.set('jsonrpc', JSON.stringify(payload));
 
-  const handshakeResponse = await withTimeout(
-    fetch(handshakeUrl, {
+  const requestHeaders: Record<string, string> = { Accept: 'application/json', ...headers };
+  delete requestHeaders['Content-Type'];
+  delete requestHeaders['content-type'];
+
+  let response: Response;
+  try {
+    response = await withTimeout(
+      fetch(target.toString(), {
+        method: 'GET',
+        headers: requestHeaders,
+      }),
+      timeoutMs,
+      'http_timeout',
+    );
+  } catch (error) {
+    if (error instanceof McpClientError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : 'Network request failed';
+    throw new McpClientError(message, 'network_error');
+  }
+
+  if (!response.ok) {
+    let body = '';
+    try {
+      body = await response.text();
+    } catch {
+      body = '';
+    }
+    throw new HttpStatusError(`HTTP error ${response.status} at ${target.toString()}`, response.status, body);
+  }
+
+  let raw = '';
+  try {
+    raw = await response.text();
+  } catch {
+    throw new McpClientError('Failed to read response body', 'invalid_response');
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { jsonrpc: '2.0', id: payload.id ?? null, result: undefined };
+  }
+
+  try {
+    return JSON.parse(trimmed) as RpcResponse;
+  } catch {
+    throw new McpClientError('Failed to parse JSON-RPC response', 'invalid_json');
+  }
+}
+async function sendViaSse(
+  config: SseRequestConfig,
+  payload: RpcPayload,
+  _unusedHandshakeUrl?: string,
+): Promise<RpcResponse> {
+  const controller = new AbortController();
+  const response = await withTimeout(
+    fetch(config.url, {
       method: 'GET',
       headers: {
         Accept: 'text/event-stream',
-        'Mcp-Handshake': '1',
         ...config.headers,
       },
       signal: controller.signal,
     }),
     config.timeoutMs,
-    'Handshake timed out',
+    'sse_connection_timeout',
   );
 
-  if (!handshakeResponse.ok || !handshakeResponse.body) {
+  if (!response.ok || !response.body) {
     controller.abort();
-    throw new McpClientError(`Handshake failed with status ${handshakeResponse.status}`, 'handshake_failed');
+    throw new McpClientError(`SSE connection failed with status ${response.status}`, 'sse_connection_failed');
   }
 
-  const stream = new SseStream(handshakeResponse.body.getReader());
+  const stream = new SseStream(response.body.getReader());
 
   try {
-    const endpointEvent = await stream.waitForEvent('endpoint', config.timeoutMs);
-    if (!endpointEvent?.data) {
-      throw new McpClientError('Handshake did not return a post endpoint', 'handshake_failed');
-    }
-
-    const postUrl = buildPostUrl(handshakeUrl, endpointEvent.data);
-    const sessionId = extractSessionId(endpointEvent.data);
-
     const postHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
       Accept: 'application/json',
+      'Content-Type': 'application/json',
       ...config.headers,
     };
-    if (sessionId) {
-      postHeaders['Mcp-Session-Id'] = sessionId;
-    }
 
-    const rpcResponse = await withTimeout(
-      fetch(postUrl, {
-        method: 'POST',
-        headers: postHeaders,
-        body: JSON.stringify(payload),
-      }),
-      config.timeoutMs,
-      'RPC request timed out',
-    );
-
-    if (!rpcResponse.ok && rpcResponse.status !== 202) {
-      throw new McpClientError(`RPC request failed with status ${rpcResponse.status}`, 'rpc_failed');
-    }
+    await postJsonRpc(config.url, payload, postHeaders, config.timeoutMs);
 
     const messageEvent = await stream.waitForMessage(payload.id, config.timeoutMs);
     if (!messageEvent) {
@@ -334,48 +410,12 @@ async function sendViaSse(config: SseRequestConfig, payload: RpcPayload, explici
       throw new McpClientError(parsed.error?.message ?? 'MCP error response', 'mcp_error');
     }
 
-    return parsed;
+    return parsed as RpcResponse;
   } finally {
     await stream.close().catch(() => undefined);
     controller.abort();
   }
 }
-
-function createRpcPayload(method: string, params: Record<string, unknown>): RpcPayload {
-  return {
-    jsonrpc: '2.0',
-    id: generateRequestId(),
-    method,
-    params,
-  };
-}
-
-function generateRequestId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-
-  return Math.random().toString(16).slice(2);
-}
-
-function buildPostUrl(handshakeUrl: string, endpointPath: string): string {
-  try {
-    const base = new URL(handshakeUrl);
-    return new URL(endpointPath, base).toString();
-  } catch (error) {
-    throw new McpClientError('Invalid post endpoint returned by server', 'invalid_endpoint');
-  }
-}
-
-function extractSessionId(path: string): string | undefined {
-  try {
-    const url = new URL(path, 'https://dummy-base');
-    return url.searchParams.get('sessionId') ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 class SseStream {
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
   private readonly decoder = new TextDecoder();
@@ -514,4 +554,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
   }
 }
 
-export { McpClientError };
+function isRetryableError(error: McpClientError): boolean {\n  return error.code === 'http_timeout' || error.code === 'network_error';\n}\n\nexport { McpClientError };
+
+
+
+

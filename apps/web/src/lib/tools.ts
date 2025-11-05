@@ -24,11 +24,13 @@ export function parseToolCommand(raw: string): { name: string; args: Record<stri
 }
 
 export function serverToPayload(server: ServerOption): ServerConfigPayload {
+  const handshake = server.handshakeUrl?.trim();
   return {
     url: server.url,
     transport: server.transport,
     headers: server.headers,
-    handshakeUrl: server.handshakeUrl,
+    handshakeUrl: handshake && handshake.length > 0 ? handshake : undefined,
     timeoutMs: server.timeoutMs,
   };
 }
+

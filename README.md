@@ -2,6 +2,8 @@
 
 Cloudflare Worker + Supabase + DeepWiki MCP demo (Natura AI Assessment 1)
 
+Includes a Worker-hosted Mock MCP alongside DeepWiki and Llama HTTP servers so tool discovery always works in demos.
+
 ```
 ┌────────────────────────┐        ┌──────────────────────────┐
 │  React + Vite (Pages)  │ fetch  │   Cloudflare Worker API   │
@@ -41,7 +43,7 @@ mcp-chatbot-demo/
 | `SUPABASE_SERVICE_ROLE_KEY` | GitHub Secret           | Service role key for auth admin/profile writes     |
 | `JWT_COOKIE_NAME`           | GitHub Secret           | Session cookie name (e.g. `mcp_demo_session`)       |
 | `VITE_API_BASE`             | GitHub Repository Var   | Public URL for Worker API (Pages build time)       |
-| `ALLOWED_ORIGIN`            | Wrangler `vars`         | CORS origin (`https://ankitb47.github.io/mcp-chatbot-demo/`) |
+| `ALLOWED_ORIGIN`            | Wrangler `vars`         | CORS origin (`https://ankitb47.github.io`) |
 
 Supabase schema requirement:
 
@@ -102,9 +104,9 @@ create table if not exists public.profiles (
 
 ### MCP client (`packages/mcp-client`)
 
-* Creates SSE handshake to obtain session + post endpoint.
-* Posts JSON-RPC requests and listens for matching SSE message events.
-* Derives SSE URL from HTTP endpoint if none provided (DeepWiki compat).
+* Optional handshake; automatically falls back when servers skip `initialize`.
+* Posts JSON-RPC over HTTP with GET retry for servers that reject POST.
+* SSE transport remains experimental; HTTP fallback is attempted where possible.
 
 ### Frontend UX highlights
 
@@ -113,14 +115,15 @@ create table if not exists public.profiles (
 - Zustand store keeps chat transcript, server catalogue, tool toggles.
 - Modern chat layout: sidebar server/tools, markdown bubbles, typing indicator, tool result cards.
 - Toast feedback on auth/tool/chat actions.
+- Pre-seeded MCP servers: Demo Mock MCP (Worker JSON-RPC), DeepWiki HTTP, and Llama HTTP.
 
 ### How to test end-to-end
 
 1. Register a user on `/register`.
 2. Sign in and land on `/chat`.
-3. Ensure the sidebar shows “DeepWiki HTTP” (default selection).
-4. Click **Load tools** → tool list populates.
-5. In composer, send `/read_wiki_structure {"repoName": "facebook/react"}` → expect JSON payload card.
+3. With “Demo Mock MCP” selected, click **Load tools** → echo/time/http_title appear.
+4. Run `/echo {"text":"hi"}` → expect JSON result card.
+5. Switch to “DeepWiki HTTP” or “Llama HTTP” and load tools; fall back toast should appear if the endpoint skips handshakes.
 6. Send a plain message (no slash) → assistant echoes template reply.
 
 ### Known limitations
