@@ -125,10 +125,17 @@ export default {
         }
 
         try {
-          const tools = await listMcpTools(server);
-          return jsonResponse(env, tools);
+          const result = await listMcpTools(server);
+          if (result.ok) {
+            return jsonResponse(env, result);
+          }
+          return jsonResponse(env, result);
         } catch (error) {
-          return jsonResponse(env, errorPayload('mcp_unreachable', asErrorMessage(error, 'Failed to list tools')), 502);
+          return jsonResponse(env, {
+            ok: false,
+            status: 502,
+            message: asErrorMessage(error, 'Failed to list tools'),
+          });
         }
       }
 
@@ -442,11 +449,8 @@ async function handleMockMcp(request: Request, env: Env): Promise<Response> {
           return rpcSuccess(env, rpcId, { echoed: args });
         case 'time_now': {
           const now = new Date();
-          const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
           return rpcSuccess(env, rpcId, {
             iso: now.toISOString(),
-            epochMs: now.getTime(),
-            timeZone,
           });
         }
         case 'http_title': {
@@ -473,27 +477,26 @@ async function handleMockMcp(request: Request, env: Env): Promise<Response> {
             });
 
             if (!response.ok) {
-              return rpcErrorResponse(
-                env,
-                rpcId,
-                -32000,
-                `Failed to fetch URL (status ${response.status})`,
-              );
+              return rpcSuccess(env, rpcId, {
+                url: target.toString(),
+                title: null,
+                status: response.status,
+              });
             }
 
             const body = await response.text();
-            const match = /<title[^>]*>([^<]*)<\/title>/i.exec(body);
-            if (!match) {
-              return rpcErrorResponse(env, rpcId, -32001, 'Page does not contain a <title> element');
-            }
-
+            const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(body);
             return rpcSuccess(env, rpcId, {
               url: target.toString(),
-              title: match[1].trim(),
+              title: match ? match[1].trim() : null,
             });
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unable to fetch URL';
-            return rpcErrorResponse(env, rpcId, -32000, message);
+            return rpcSuccess(env, rpcId, {
+              url: target.toString(),
+              title: null,
+              error: message,
+            });
           }
         }
         default:

@@ -101,6 +101,21 @@ export default function ChatPage() {
       }
 
       const { server, usedFallback } = params;
+
+      if (!response.ok) {
+        const warnings = response.warnings ?? [];
+        if (response.status === 405 || response.status === 406) {
+          toast('This server may not support JSON-RPC POST at this path. Try another server or SSE.', {
+            icon: 'ℹ️',
+            duration: 5000,
+          });
+        } else {
+          toast.error(response.message);
+        }
+        warnings.forEach((warning) => toast(warning, { icon: 'ℹ️', duration: 4000 }));
+        return;
+      }
+
       setToolsForServer(server.id, response.tools);
       toast.success(`Loaded ${response.tools.length} tool${response.tools.length === 1 ? '' : 's'}.`);
       response.warnings?.forEach((warning) => toast(warning, { icon: 'ℹ️', duration: 4000 }));
@@ -108,17 +123,7 @@ export default function ChatPage() {
         toast('SSE endpoint responded via HTTP fallback.', { icon: 'ℹ️', duration: 4000 });
       }
     },
-    onError: (error: unknown, params) => {
-      const targetServer = params?.server;
-      if (error instanceof ApiError && targetServer) {
-        if (error.status === 404 || error.status === 405) {
-          toast.error(
-            `Couldn't list tools at ${targetServer.url} (status ${error.status}). This server may not support JSON-RPC POST; try another.`,
-          );
-          return;
-        }
-      }
-
+    onError: (error: unknown) => {
       const message = error instanceof ApiError || error instanceof Error ? error.message : 'Unable to load tools.';
       toast.error(message);
     },

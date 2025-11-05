@@ -65,10 +65,20 @@ export interface ToolDefinition {
   description?: string;
 }
 
-export interface ListToolsApiResponse {
+export interface ListToolsSuccess {
+  ok: true;
   tools: ToolDefinition[];
   warnings?: string[];
 }
+
+export interface ListToolsFailure {
+  ok: false;
+  status?: number;
+  message: string;
+  warnings?: string[];
+}
+
+export type ListToolsApiResponse = ListToolsSuccess | ListToolsFailure;
 
 export interface ChatResponse {
   reply: {
