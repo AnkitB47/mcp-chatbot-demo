@@ -17,11 +17,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install dependencies
-        working-directory: apps/worker
         run: npm install
+
+      - name: Install Worker workspace
+        run: npm install --workspace apps/worker
 
       - name: Publish Worker
         uses: cloudflare/wrangler-action@v3

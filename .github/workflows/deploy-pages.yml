@@ -26,11 +26,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install dependencies
-        working-directory: apps/web
         run: npm install
+
+      - name: Install web workspace
+        run: npm install --workspace apps/web
 
       - name: Inject Vite environment
         working-directory: apps/web
