@@ -12,19 +12,25 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const loginMutation = useMutation({
-    mutationFn: () => api.login({ usernameOrEmail, password }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['session'] });
+    mutationFn: async () => {
+      const identifier = usernameOrEmail.trim();
+      await api.login({ usernameOrEmail: identifier, password });
+      return api.getSession();
+    },
+    onSuccess: (session) => {
+      queryClient.setQueryData(['session'], session);
       toast.success('Welcome back!');
       const next = (location.state as { from?: string } | null)?.from ?? '/chat';
       navigate(next, { replace: true });
     },
     onError: (error: unknown) => {
+      queryClient.removeQueries({ queryKey: ['session'] });
+      queryClient.setQueryData(['session'], undefined);
       if (error instanceof ApiError) {
         toast.error(error.message);
         return;
       }
-      toast.error('Unable to sign in.');
+      toast.error(error instanceof Error ? error.message : 'Unable to sign in.');
     },
   });
 
@@ -68,7 +74,7 @@ export default function LoginPage() {
       </div>
 
       <button className="primary-button" type="submit" disabled={loginMutation.isPending}>
-        {loginMutation.isPending ? 'Signing in…' : 'Sign in'}
+        {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
       </button>
 
       <div style={{ marginTop: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>

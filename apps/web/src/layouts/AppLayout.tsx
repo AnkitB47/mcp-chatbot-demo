@@ -4,10 +4,11 @@ import TopBar from '../components/TopBar';
 
 export default function AppLayout({ children }: PropsWithChildren) {
   const { data } = useSessionQuery();
+  const displayName = data?.username ?? data?.email ?? null;
 
   return (
     <div className="app-shell">
-      <TopBar username={data?.username ?? null} />
+      <TopBar username={displayName} />
       <main className="app-main">{children}</main>
     </div>
   );

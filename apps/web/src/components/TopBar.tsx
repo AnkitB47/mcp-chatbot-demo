@@ -15,6 +15,7 @@ export default function TopBar({ username }: TopBarProps) {
     mutationFn: api.logout,
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: ['session'] });
+      queryClient.setQueryData(['session'], undefined);
       toast.success('Signed out');
       navigate('/login', { replace: true });
     },
@@ -37,7 +38,7 @@ export default function TopBar({ username }: TopBarProps) {
     >
       <div>
         <strong style={{ fontSize: '1.15rem', letterSpacing: '0.02em' }}>Natura MCP Chatbot</strong>
-        <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>Cloudflare Worker · Supabase · DeepWiki MCP</div>
+        <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>Cloudflare Worker / Supabase / DeepWiki MCP</div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -69,7 +70,7 @@ export default function TopBar({ username }: TopBarProps) {
           onClick={() => logoutMutation.mutate()}
           disabled={logoutMutation.isPending}
         >
-          {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
+          {logoutMutation.isPending ? 'Signing out...' : 'Sign out'}
         </button>
       </div>
     </header>

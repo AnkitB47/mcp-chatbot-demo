@@ -24,11 +24,17 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 
     try {
       const parsed = JSON.parse(text);
-      if (parsed?.error?.message) {
-        message = parsed.error.message;
-      }
-      if (parsed?.error?.code) {
-        code = parsed.error.code;
+      if (parsed?.error) {
+        if (typeof parsed.error === 'string') {
+          message = parsed.error;
+        } else {
+          if (typeof parsed.error.message === 'string') {
+            message = parsed.error.message;
+          }
+          if (typeof parsed.error.code === 'string') {
+            code = parsed.error.code;
+          }
+        }
       }
     } catch {
       // Ignore JSON parse issues for error bodies.
@@ -42,6 +48,7 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 
 export interface SessionResponse {
   userId: string;
+  email: string;
   username: string | null;
 }
 
@@ -79,7 +86,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    return (await res.json()) as { ok: boolean };
+    return (await res.json()) as { ok: boolean; userId: string };
   },
 
   login: async (body: { usernameOrEmail: string; password: string }) => {

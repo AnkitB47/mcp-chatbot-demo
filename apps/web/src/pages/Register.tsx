@@ -12,18 +12,28 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
 
   const registerMutation = useMutation({
-    mutationFn: () => api.register({ username, email, password }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['session'] });
+    mutationFn: async () => {
+      const payload = {
+        username: username.trim(),
+        email: email.trim(),
+        password,
+      };
+      await api.register(payload);
+      return api.getSession();
+    },
+    onSuccess: (session) => {
+      queryClient.setQueryData(['session'], session);
       toast.success('Account ready!');
       navigate('/chat', { replace: true });
     },
     onError: (error: unknown) => {
+      queryClient.removeQueries({ queryKey: ['session'] });
+      queryClient.setQueryData(['session'], undefined);
       if (error instanceof ApiError) {
         toast.error(error.message);
         return;
       }
-      toast.error('Registration failed.');
+      toast.error(error instanceof Error ? error.message : 'Registration failed.');
     },
   });
 
@@ -79,7 +89,7 @@ export default function RegisterPage() {
       </div>
 
       <button className="primary-button" type="submit" disabled={registerMutation.isPending}>
-        {registerMutation.isPending ? 'Registering…' : 'Register'}
+        {registerMutation.isPending ? 'Registering...' : 'Register'}
       </button>
 
       <div style={{ marginTop: '1.5rem', fontSize: '0.9rem', textAlign: 'center' }}>

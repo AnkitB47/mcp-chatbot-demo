@@ -1,5 +1,5 @@
 import { callTool as callMcpTool, listTools as listMcpTools, McpClientError } from '@mcp-chatbot-demo/mcp-client';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { parse as parseCookie } from 'cookie';
 
 interface Env {
@@ -81,11 +81,27 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/me') {
-        const user = await requireUser(request, env);
-        if (!user) {
-          return jsonResponse(env, errorPayload('auth_failed', 'Authentication required'), 401);
+        const supabase = createSupabase(env);
+        const { token, user } = await getUserFromCookie(request, env, supabase);
+        if (!token || !user) {
+          return jsonResponse(env, { error: 'unauthorized' }, 401);
         }
-        return jsonResponse(env, { userId: user.userId, username: user.username });
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          return jsonResponse(env, { error: 'unauthorized' }, 401);
+        }
+
+        return jsonResponse(env, {
+          userId: user.id,
+          email: user.email ?? '',
+          username: profile?.username ?? null,
+        });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/mcp/list') {
@@ -262,14 +278,9 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   }
 
   const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
-  return jsonResponse(
-    env,
-    { ok: true },
-    201,
-    {
-      'Set-Cookie': attachSessionCookie(cookieName, loginResult.data.session.access_token),
-    },
-  );
+  return jsonResponse(env, { ok: true, userId: createdUser.user.id }, 201, {
+    'Set-Cookie': attachSessionCookie(cookieName, loginResult.data.session.access_token),
+  });
 }
 
 async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -356,31 +367,23 @@ function createSupabase(env: Env): SupabaseClient {
 }
 
 async function requireUser(request: Request, env: Env): Promise<AuthenticatedUser | null> {
-  const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
-  const cookies = parseCookie(request.headers.get('Cookie') ?? '');
-  const accessToken = cookies[cookieName];
-
-  if (!accessToken) {
-    return null;
-  }
-
   const supabase = createSupabase(env);
-  const { data, error } = await supabase.auth.getUser(accessToken);
-  if (error || !data?.user?.id) {
+  const { user } = await getUserFromCookie(request, env, supabase);
+  if (!user) {
     return null;
   }
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('username')
-    .eq('user_id', data.user.id)
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (profileError) {
-    return { userId: data.user.id, username: null };
+    return { userId: user.id, username: null };
   }
 
-  return { userId: data.user.id, username: profile?.username ?? null };
+  return { userId: user.id, username: profile?.username ?? null };
 }
 
 function parseToolCommand(raw: string): { name: string; args: Record<string, unknown> } | null {
@@ -490,6 +493,35 @@ function jsonResponse(
       ...(extraHeaders ?? {}),
     },
   });
+}
+
+function readCookie(request: Request, name: string): string | null {
+  const raw = request.headers.get('Cookie');
+  if (!raw) {
+    return null;
+  }
+  const cookies = parseCookie(raw);
+  const value = cookies[name];
+  return typeof value === 'string' ? value : null;
+}
+
+async function getUserFromCookie(
+  request: Request,
+  env: Env,
+  supabase: SupabaseClient,
+): Promise<{ token: string | null; user: User | null }> {
+  const cookieName = env.JWT_COOKIE_NAME ?? 'mcp_demo_session';
+  const token = readCookie(request, cookieName);
+  if (!token) {
+    return { token: null, user: null };
+  }
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user) {
+    return { token, user: null };
+  }
+
+  return { token, user: data.user };
 }
 
 function errorPayload(code: string, message: string): JsonRecord {
