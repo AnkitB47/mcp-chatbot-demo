@@ -28,10 +28,7 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Install web workspace
-        run: npm install --workspace apps/web
+        run: npm install --workspaces --include-workspace-root
 
       - name: Inject Vite environment
         working-directory: apps/web

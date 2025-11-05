@@ -19,10 +19,7 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Install Worker workspace
-        run: npm install --workspace apps/worker
+        run: npm install --workspaces --include-workspace-root
 
       - name: Publish Worker
         uses: cloudflare/wrangler-action@v3
